@@ -7,11 +7,11 @@
 #define MAX(a, b) ((a) > (b)) ? (a) : (b)
 #define MIN(a, b) ((a) < (b)) ? (a) : (b)
 
-typedef struct VS_Image {
+typedef struct VS_image {
     char *px;
     int width, height;
     int pixel_size;
-} VS_Image;
+} VS_image;
 
 typedef struct VS_pixel_RGB {
     unsigned char r, g, b;
@@ -25,12 +25,18 @@ struct point {
     double x, y;
 };
 
-int VS_getpixel(VS_Image *img, int x, int y, VS_pixel_RGB **pixel);
+int VS_getpixel(VS_image *img, int x, int y, VS_pixel_RGB **pixel);
 
 int VS_RGB_HSV(VS_pixel_RGB *inpixel, VS_pixel_HSV **outpixel);
 
 double VS_get_colour_x(VS_pixel_HSV *pixel);
 double VS_get_colour_y(VS_pixel_HSV *pixel);
+
+void VS_draw_circle(VS_image *img, struct point *center, int r);
+
+void VS_put_pixel(VS_image *img, VS_pixel_RGB *pixel, struct point *coord);
+
+int VS_create_vectorscope(VS_image *img, int radius);
 
 int main(int argc, char *argv[])
 {
@@ -44,37 +50,49 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    struct img_pixmap output_img;
-    img_init(&output_img);
+    VS_image *output_img = (VS_image *)malloc(sizeof(VS_image));
+    if (output_img == NULL) {
+        perror("Issue allocating for output image:");
+        return 1;
+    }
+    output_img->width = radius * 2 + 1;
+    output_img->height = radius * 2 + 1;
+    output_img->pixel_size = 4;
+    output_img->px = (char *)calloc(output_img->width * output_img->height, sizeof(char *));
 
-    for (int i = 2; i < argc; i++) {
-        printf("Working on %s\n", argv[i]);
+    /* for (int i = 2; i < argc; i++) { */
+    /*     printf("Working on %s\n", argv[i]); */
 
-        char *infile = argv[i];
-        struct VS_Image img;
-        img.pixel_size = 3;
-        void *px = img_load_pixels(infile, &img.width, &img.height, IMG_FMT_RGBA32);
-        if (px == NULL) {
-            fprintf(stderr, "Unable to load pixels from image: %s", infile);
-        }
-        img.px = (char *)px;
+    /*     char *infile = argv[i]; */
+    /*     struct VS_image img; */
+    /*     img.pixel_size = 4; */
+    /*     void *px = img_load_pixels(infile, &img.width, &img.height, IMG_FMT_RGBA32); */
+    /*     if (px == NULL) { */
+    /*         fprintf(stderr, "Unable to load pixels from image: %s", infile); */
+    /*     } */
+    /*     img.px = (char *)px; */
 
-        VS_pixel_RGB *rgb_pixel = (VS_pixel_RGB *)malloc(sizeof(VS_pixel_RGB));
-        VS_pixel_HSV *hsv_pixel = (VS_pixel_HSV *)malloc(sizeof(VS_pixel_HSV));
-        if (VS_getpixel(&img, 0, 0, &rgb_pixel) != 0) {
-            return 1;
-        };
-        if (VS_RGB_HSV(rgb_pixel, &hsv_pixel) != 0) {
-            return 1;
-        }
+    /*     VS_pixel_RGB *rgb_pixel = (VS_pixel_RGB *)malloc(sizeof(VS_pixel_RGB)); */
+    /*     VS_pixel_HSV *hsv_pixel = (VS_pixel_HSV *)malloc(sizeof(VS_pixel_HSV)); */
+    /*     if (VS_getpixel(&img, 0, 0, &rgb_pixel) != 0) { */
+    /*         return 1; */
+    /*     }; */
+    /*     if (VS_RGB_HSV(rgb_pixel, &hsv_pixel) != 0) { */
+    /*         return 1; */
+    /*     } */
 
-        img_free_pixels(px);
+    /*     img_free_pixels(px); */
+    /* } */
+    if (VS_create_vectorscope(output_img, radius) != 0) {
+        return 1;
     }
 
+    free(output_img->px);
+    free(output_img);
     return 0;
 }
 
-int VS_getpixel(VS_Image *img, int x, int y, VS_pixel_RGB **pixel)
+int VS_getpixel(VS_image *img, int x, int y, VS_pixel_RGB **pixel)
 {
     if (x >= img->width || y >= img->height) {
         fprintf(stderr, "Give a valid x, y coord within %d x %d", img->width, img->height);
@@ -145,4 +163,55 @@ double VS_get_colour_x(VS_pixel_HSV *pixel)
 double VS_get_colour_y(VS_pixel_HSV *pixel)
 {
     return sin(pixel->h);
+}
+
+void VS_draw_circle(VS_image *img, struct point *center, int r)
+{
+    VS_pixel_RGB color = {.r = 140, .g = 108, .b = 0};
+    int x = 0;
+    int y = r;
+    int d = 3 - 2 * r;
+
+    while (x <= y) {
+        VS_put_pixel(img, &color, &((struct point){center->x + x, center->y + y}));
+        VS_put_pixel(img, &color, &((struct point){center->x - x, center->y + y}));
+        VS_put_pixel(img, &color, &((struct point){center->x + x, center->y - y}));
+        VS_put_pixel(img, &color, &((struct point){center->x - x, center->y - y}));
+
+        VS_put_pixel(img, &color, &((struct point){center->x + y, center->y + x}));
+        VS_put_pixel(img, &color, &((struct point){center->x - y, center->y + x}));
+        VS_put_pixel(img, &color, &((struct point){center->x + y, center->y - x}));
+        VS_put_pixel(img, &color, &((struct point){center->x - y, center->y - x}));
+
+        if (d < 0) {
+            d += 4 * x + 6;
+        } else {
+            d += 4 * (x - y) + 10;
+            y--;
+        }
+
+        x++;
+    }
+}
+
+void VS_put_pixel(VS_image *img, VS_pixel_RGB *pixel, struct point *coord)
+{
+    int x = (int)coord->x, y = (int)coord->y;
+    int loc = ((y * img->width) + x) * img->pixel_size;
+    img->px[loc] = pixel->r;
+    img->px[loc + 1] = pixel->g;
+    img->px[loc + 2] = pixel->b;
+    img->px[loc + 3] = (char)255;
+}
+
+int VS_create_vectorscope(VS_image *img, int radius)
+{
+
+    int thickness = 4;
+    for (int i = 0; i < thickness; i++) {
+        VS_draw_circle(img, &(struct point){.x = radius, .y = radius}, radius - i);
+    }
+    img_save_pixels("output.jpg", (void *)img->px, img->width, img->height, IMG_FMT_RGBA32);
+
+    return 0;
 }
