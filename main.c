@@ -39,9 +39,13 @@ void VS_draw_line(VS_image *img, struct point *start, double length, double angl
 void VS_draw_circle_line(VS_image *img, struct point center, double circle_radius, double circle_angle_degrees, double length, int thickness);
 
 void VS_put_pixel(VS_image *img, VS_pixel_RGB *pixel, struct point *coord);
+void VS_set_alpha(VS_image *img, int x, int y, unsigned char alpha);
 
 int VS_create_vectorscope(VS_image *img, int radius);
 void VS_place_colour(VS_image *img, VS_pixel_RGB *colour, VS_pixel_HSV *pixel, int radius);
+
+char outside_circle(int radius, struct point *coord);
+int VS_save_png(const char *filename, VS_image *img);
 
 int main(int argc, char *argv[])
 {
@@ -300,6 +304,16 @@ void VS_draw_circle_line(VS_image *img, struct point center, double circle_radiu
     );
 }
 
+void VS_set_alpha(VS_image *img, int x, int y, unsigned char alpha)
+{
+    if (x < 0 || x >= img->width || y < 0 || y >= img->height) {
+        return;
+    }
+
+    int offset = (y * img->width + x) * img->pixel_size;
+    img->px[offset + 3] = (char)alpha;
+}
+
 int VS_create_vectorscope(VS_image *img, int radius)
 {
 
@@ -330,6 +344,14 @@ int VS_create_vectorscope(VS_image *img, int radius)
     VS_draw_line(img, &(struct point){0, radius}, radius * 2, 0, crossbar_thickness);
     VS_draw_line(img, &(struct point){radius, 0}, radius * 2, -90, crossbar_thickness);
 
+    for (int x = 0; x < img->width; x++) {
+        for (int y = 0; y < img->height; y++) {
+            if (outside_circle(radius, &(struct point){x, y})) {
+                VS_set_alpha(img, x, y, 0);
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -345,4 +367,17 @@ void VS_place_colour(VS_image *img, VS_pixel_RGB *colour, VS_pixel_HSV *pixel, i
             VS_put_pixel(img, colour, &(struct point){x + i, y + j});
         }
     }
+}
+
+char outside_circle(int radius, struct point *coord)
+{
+    int center_x = radius, center_y = radius;
+    if (pow(coord->x - center_x, 2) + pow(coord->y - center_y, 2) != pow(radius, 2)) {
+        int distance = sqrt(pow(coord->x - center_x, 2) + pow(coord->y - center_y, 2));
+        if ((distance + 1) > radius) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
