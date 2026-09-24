@@ -1,5 +1,6 @@
 #include <imago2.h>
 #include <math.h>
+#include <png.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +68,15 @@ int main(int argc, char *argv[])
     output_img->width = radius * 2 + 1;
     output_img->height = radius * 2 + 1;
     output_img->pixel_size = 4;
-    output_img->px = (char *)calloc(output_img->width * output_img->height, sizeof(char *));
+    output_img->px = (char *)calloc(
+        output_img->width * output_img->height,
+        output_img->pixel_size
+    );
+    if (output_img->px == NULL) {
+        perror("Issue allocating output pixels");
+        free(output_img);
+        return 1;
+    }
 
     VS_pixel_RGB *rgb_pixel = (VS_pixel_RGB *)malloc(sizeof(VS_pixel_RGB));
     VS_pixel_HSV *hsv_pixel = (VS_pixel_HSV *)malloc(sizeof(VS_pixel_HSV));
@@ -79,7 +88,12 @@ int main(int argc, char *argv[])
         img.pixel_size = 4;
         void *px = img_load_pixels(infile, &img.width, &img.height, IMG_FMT_RGBA32);
         if (px == NULL) {
-            fprintf(stderr, "Unable to load pixels from image: %s", infile);
+            fprintf(stderr, "Unable to load pixels from image: %s\n", infile);
+            free(rgb_pixel);
+            free(hsv_pixel);
+            free(output_img->px);
+            free(output_img);
+            return 1;
         }
         img.px = (char *)px;
 
@@ -92,8 +106,6 @@ int main(int argc, char *argv[])
                     return 1;
                 }
 
-                printf("%d %d %d\n", rgb_pixel->r, rgb_pixel->g, rgb_pixel->b);
-                return 0;
                 VS_place_colour(output_img, rgb_pixel, hsv_pixel, radius);
             }
         }
@@ -104,12 +116,73 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    img_save_pixels("output.jpg", (void *)output_img->px, output_img->width, output_img->height, IMG_FMT_RGBA32);
+    if (VS_save_png("output.png", output_img) != 0) {
+        fprintf(stderr, "Unable to save the output vectorscope image.\n");
+        free(rgb_pixel);
+        free(hsv_pixel);
+        free(output_img->px);
+        free(output_img);
+        return 1;
+    }
 
     free(rgb_pixel);
     free(hsv_pixel);
     free(output_img->px);
     free(output_img);
+    return 0;
+}
+
+int VS_save_png(const char *filename, VS_image *img)
+{
+    FILE *file = fopen(filename, "wb");
+    if (file == NULL) {
+        return 1;
+    }
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    png_infop info = png_create_info_struct(png);
+    if (png == NULL || info == NULL) {
+        png_destroy_write_struct(png != NULL ? &png : NULL, info != NULL ? &info : NULL);
+        fclose(file);
+        return 1;
+    }
+
+    if (setjmp(png_jmpbuf(png)) != 0) {
+        png_destroy_write_struct(&png, &info);
+        fclose(file);
+        return 1;
+    }
+
+    png_init_io(png, file);
+    png_set_IHDR(
+        png,
+        info,
+        img->width,
+        img->height,
+        8,
+        PNG_COLOR_TYPE_RGBA,
+        PNG_INTERLACE_NONE,
+        PNG_COMPRESSION_TYPE_DEFAULT,
+        PNG_FILTER_TYPE_DEFAULT
+    );
+
+    png_bytep *rows = malloc(img->height * sizeof(*rows));
+    if (rows == NULL) {
+        png_destroy_write_struct(&png, &info);
+        fclose(file);
+        return 1;
+    }
+
+    for (int y = 0; y < img->height; y++) {
+        rows[y] = (png_bytep)(img->px + y * img->width * img->pixel_size);
+    }
+
+    png_set_rows(png, info, rows);
+    png_write_png(png, info, PNG_TRANSFORM_IDENTITY, NULL);
+
+    free(rows);
+    png_destroy_write_struct(&png, &info);
+    fclose(file);
     return 0;
 }
 
@@ -188,7 +261,7 @@ double VS_get_colour_y(VS_pixel_HSV *pixel)
 
 void VS_draw_circle(VS_image *img, struct point *center, int r)
 {
-    VS_pixel_RGB colour = {.r = 140, .g = 108, .b = 0};
+    VS_pixel_RGB colour = {.r = 170, .g = 138, .b = 0};
     int x = 0;
     int y = r;
     int d = 3 - 2 * r;
@@ -232,7 +305,7 @@ void VS_put_pixel(VS_image *img, VS_pixel_RGB *pixel, struct point *coord)
 
 void VS_draw_line(VS_image *img, struct point *start, double length, double angle_degrees, int thickness)
 {
-    VS_pixel_RGB colour = {.r = 254, .g = 250, .b = 238};
+    VS_pixel_RGB colour = {.r = 170, .g = 138, .b = 0};
 
     double angle = angle_degrees * M_PI / 180.0;
 
@@ -316,6 +389,13 @@ void VS_set_alpha(VS_image *img, int x, int y, unsigned char alpha)
 
 int VS_create_vectorscope(VS_image *img, int radius)
 {
+    for (int x = 0; x < img->width; x++) {
+        for (int y = 0; y < img->height; y++) {
+            if (!outside_circle(radius, &(struct point){x, y})) {
+                VS_set_alpha(img, x, y, 255);
+            }
+        }
+    }
 
     int thickness = radius / 100;
     for (int i = 0; i < thickness; i++) {
@@ -343,14 +423,6 @@ int VS_create_vectorscope(VS_image *img, int radius)
     int crossbar_thickness = radius / 200;
     VS_draw_line(img, &(struct point){0, radius}, radius * 2, 0, crossbar_thickness);
     VS_draw_line(img, &(struct point){radius, 0}, radius * 2, -90, crossbar_thickness);
-
-    for (int x = 0; x < img->width; x++) {
-        for (int y = 0; y < img->height; y++) {
-            if (outside_circle(radius, &(struct point){x, y})) {
-                VS_set_alpha(img, x, y, 0);
-            }
-        }
-    }
 
     return 0;
 }
