@@ -2,4 +2,5 @@
 .idea
 *.log
 tmp/
-exe
+vectorscoper
+output.png
